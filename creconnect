@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Parse flags
+target=""
+do_all=false
+dry_run=false
+for arg in "$@"; do
+  case "$arg" in
+    --all|-a) do_all=true ;;
+    --dry-run|-n) dry_run=true ;;
+    -*) echo "Unknown flag: $arg" >&2; exit 1 ;;
+    *) target="$arg" ;;
+  esac
+done
+
+if ! $do_all && [ -z "$target" ]; then
+  echo "Usage: creconnect <name> | --all [-n|--dry-run]"
+  exit 1
+fi
+
+# Get session and pty data
+csesh_json=$("${SCRIPT_DIR}/csesh" --json)
+pty_json=$(pty list --json 2>/dev/null)
+
+# Filter pty to claude sessions only, then join with csesh on ppid == pid
+matches=$(echo "$csesh_json" | jq -r --argjson pty "$pty_json" '
+  [.[] | . as $s |
+    ($pty[] | select(.command | test("claude")) | select(.pid == $s.ppid)) as $p |
+    {
+      pty_name: $p.name,
+      project: $s.name,
+      has_url: ($s.url != null),
+      url: ($s.url // "")
+    }
+  ] | .[] | [.pty_name, .project, (.has_url | tostring), .url] | @tsv
+')
+
+if [ -z "$matches" ]; then
+  echo "No claude sessions found."
+  exit 0
+fi
+
+found=false
+reconnected=0
+
+while IFS=$'\t' read -r pty_name project has_url url; do
+  # If targeting a specific name, match against pty name or project name (case-insensitive)
+  if ! $do_all; then
+    target_lower=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+    pty_lower=$(echo "$pty_name" | tr '[:upper:]' '[:lower:]')
+    project_lower=$(echo "$project" | tr '[:upper:]' '[:lower:]')
+    if [ "$pty_lower" != "$target_lower" ] && [ "$project_lower" != "$target_lower" ]; then
+      continue
+    fi
+  fi
+
+  found=true
+
+  if [ "$has_url" = "true" ]; then
+    echo "  $project ($pty_name): already connected — $url"
+    continue
+  fi
+
+  if $dry_run; then
+    echo "  $project ($pty_name): would reconnect"
+  else
+    echo "  $project ($pty_name): reconnecting..."
+    pty send "$pty_name" --seq "/remote-control" --seq key:return
+    reconnected=$((reconnected + 1))
+  fi
+done <<< "$matches"
+
+if ! $found; then
+  echo "No claude session found matching: $target"
+  exit 1
+fi
+
+if ! $dry_run && [ "$reconnected" -gt 0 ]; then
+  echo "Reconnected $reconnected session(s)."
+fi
