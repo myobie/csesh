@@ -21,6 +21,69 @@ if ! $do_all && [ -z "$target" ]; then
   exit 1
 fi
 
+POLL_INTERVAL=1
+MAX_WAIT=10
+
+peek_pty() {
+  local pty_name="$1"
+  # --plain works for sessions started after pty was updated;
+  # fall back to stripping ANSI codes for older sessions
+  local output
+  output=$(pty peek --plain "$pty_name" 2>/dev/null)
+  if echo "$output" | grep -qP '\x1b\[' 2>/dev/null; then
+    echo "$output" | sed $'s/\x1b\[[0-9;]*C/ /g' | sed $'s/\x1b\[[0-9;]*[a-zA-Z]//g'
+  else
+    echo "$output"
+  fi
+}
+
+wait_for_pty() {
+  local pty_name="$1" pattern="$2" description="$3"
+  local waited=0
+  local output
+  while [ "$waited" -lt "$MAX_WAIT" ]; do
+    output=$(peek_pty "$pty_name")
+    if echo "$output" | grep -q "$pattern"; then
+      return 0
+    fi
+    sleep "$POLL_INTERVAL"
+    waited=$((waited + POLL_INTERVAL))
+  done
+  echo "    Timed out waiting for: $description"
+  return 1
+}
+
+# Disconnect remote control via the menu, then reconnect fresh
+rc_cycle() {
+  local pty_name="$1"
+
+  # Open the menu
+  pty send "$pty_name" --with-delay 0.3 --seq "/remote-control" --seq key:return
+
+  if ! wait_for_pty "$pty_name" 'Disconnect this session' 'disconnect menu'; then
+    pty send "$pty_name" --seq key:escape
+    return 1
+  fi
+
+  # Select "Disconnect this session" (up twice from "Continue")
+  pty send "$pty_name" --with-delay 0.3 --seq key:up --seq key:up --seq key:return
+
+  if ! wait_for_pty "$pty_name" 'Remote Control disconnected' 'disconnect confirmation'; then
+    return 1
+  fi
+
+  sleep 1
+
+  # Reconnect
+  pty send "$pty_name" --with-delay 0.3 --seq "/remote-control" --seq key:return
+
+  if ! wait_for_pty "$pty_name" 'Remote Control active' 'reconnection'; then
+    return 1
+  fi
+
+  return 0
+}
+
 # Get session and pty data
 csesh_json=$("${SCRIPT_DIR}/csesh" --json)
 pty_json=$(pty list --json 2>/dev/null)
@@ -60,7 +123,23 @@ while IFS=$'\t' read -r pty_name project has_url url; do
   found=true
 
   if [ "$has_url" = "true" ]; then
-    echo "  $project ($pty_name): already connected — $url"
+    # Check if the session is actually stuck reconnecting
+    peek_output=$(peek_pty "$pty_name")
+    if echo "$peek_output" | grep -q 'Remote Control reconnecting'; then
+      if $dry_run; then
+        echo "  $project ($pty_name): stuck reconnecting — would cycle"
+      else
+        echo "  $project ($pty_name): stuck reconnecting — cycling..."
+        if rc_cycle "$pty_name"; then
+          echo "  $project ($pty_name): reconnected successfully!"
+          reconnected=$((reconnected + 1))
+        else
+          echo "  $project ($pty_name): cycle failed"
+        fi
+      fi
+    else
+      echo "  $project ($pty_name): connected — $url"
+    fi
     continue
   fi
 
@@ -68,7 +147,7 @@ while IFS=$'\t' read -r pty_name project has_url url; do
     echo "  $project ($pty_name): would reconnect"
   else
     echo "  $project ($pty_name): reconnecting..."
-    pty send "$pty_name" --seq "/remote-control" --seq key:return
+    pty send "$pty_name" --with-delay 0.3 --seq "/remote-control" --seq key:return
     reconnected=$((reconnected + 1))
   fi
 done <<< "$matches"

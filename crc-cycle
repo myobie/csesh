@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage: crc-cycle <pty-name>
+# Disconnects and reconnects remote control for a claude pty session.
+
+name="${1:-}"
+if [ -z "$name" ]; then
+  echo "Usage: crc-cycle <pty-name>"
+  exit 1
+fi
+
+POLL_INTERVAL=1
+MAX_WAIT=10
+
+peek() {
+  local output
+  output=$(pty peek --plain "$name" 2>/dev/null)
+  if echo "$output" | grep -qP '\x1b\[' 2>/dev/null; then
+    echo "$output" | sed $'s/\x1b\[[0-9;]*C/ /g' | sed $'s/\x1b\[[0-9;]*[a-zA-Z]//g'
+  else
+    echo "$output"
+  fi
+}
+
+wait_for() {
+  local pattern="$1" description="$2"
+  local waited=0
+  local output
+  while [ "$waited" -lt "$MAX_WAIT" ]; do
+    output=$(peek)
+    if echo "$output" | grep -q "$pattern"; then
+      return 0
+    fi
+    sleep "$POLL_INTERVAL"
+    waited=$((waited + POLL_INTERVAL))
+  done
+  echo "[$name]   Timed out waiting for: $description"
+  echo "$output" | tail -5
+  return 1
+}
+
+echo "[$name] Step 1: Opening remote control menu..."
+pty send "$name" --with-delay 0.3 --seq "/remote-control" --seq key:return
+
+echo "[$name] Step 2: Waiting for menu..."
+if ! wait_for 'Disconnect this session' 'disconnect menu'; then
+  echo "[$name]   Aborting. Sending Escape to dismiss."
+  pty send "$name" --seq key:escape
+  exit 1
+fi
+echo "[$name]   Menu detected."
+
+echo "[$name] Step 3: Selecting 'Disconnect this session'..."
+pty send "$name" --with-delay 0.3 --seq key:up --seq key:up --seq key:return
+
+echo "[$name] Step 4: Waiting for disconnect..."
+if ! wait_for 'Remote Control disconnected' 'disconnect confirmation'; then
+  echo "[$name]   Aborting."
+  exit 1
+fi
+echo "[$name]   Disconnected."
+
+sleep 1
+
+echo "[$name] Step 5: Reconnecting..."
+pty send "$name" --with-delay 0.3 --seq "/remote-control" --seq key:return
+
+echo "[$name] Step 6: Waiting for reconnection..."
+if wait_for 'Remote Control active' 'remote control active'; then
+  echo "[$name]   Reconnected successfully!"
+else
+  output=$(peek)
+  if echo "$output" | grep -q 'reconnecting'; then
+    echo "[$name]   Ended up in reconnecting state again."
+  fi
+  exit 1
+fi
