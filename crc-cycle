@@ -67,12 +67,17 @@ echo "[$name] Step 5: Reconnecting..."
 pty send "$name" --with-delay 0.3 --seq "/remote-control" --seq key:return
 
 echo "[$name] Step 6: Waiting for reconnection..."
-if wait_for 'Remote Control active' 'remote control active'; then
+if wait_for '/remote-control is active' 'remote control active'; then
   echo "[$name]   Reconnected successfully!"
 else
   output=$(peek)
-  if echo "$output" | grep -q 'reconnecting'; then
+  if echo "$output" | grep -q 'Remote Control reconnecting'; then
     echo "[$name]   Ended up in reconnecting state again."
+    exit 1
+  elif echo "$output" | grep -q 'Remote Control active'; then
+    echo "[$name]   Reconnected successfully!"
+  else
+    echo "[$name]   Status unclear."
+    exit 1
   fi
-  exit 1
 fi
