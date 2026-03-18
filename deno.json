@@ -1,0 +1,11 @@
+{
+  "tasks": {
+    "dev": "deno run --allow-env --allow-read --allow-run claw.ts",
+    "compile": "deno compile --allow-env --allow-read --allow-run --output claw claw.ts",
+    "install": "bash install.sh"
+  },
+  "imports": {
+    "@std/cli": "jsr:@std/cli@^1.0",
+    "@std/path": "jsr:@std/path@^1.0"
+  }
+}

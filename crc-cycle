@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: crc-cycle <pty-name>
+# Usage: crc-cycle [--json] <pty-name>
 # Disconnects and reconnects remote control for a claude pty session.
 
-name="${1:-}"
+json_output=false
+name=""
+for arg in "$@"; do
+  case "$arg" in
+    --json) json_output=true ;;
+    -*) echo "Unknown flag: $arg" >&2; exit 1 ;;
+    *) name="$arg" ;;
+  esac
+done
+
 if [ -z "$name" ]; then
-  echo "Usage: crc-cycle <pty-name>"
+  echo "Usage: crc-cycle [--json] <pty-name>"
   exit 1
 fi
 
@@ -23,6 +32,20 @@ peek() {
   fi
 }
 
+emit() {
+  if $json_output; then
+    echo "$1"
+  else
+    echo "$2"
+  fi
+}
+
+extract_url() {
+  local output
+  output=$(peek)
+  echo "$output" | grep -o 'https://claude\.ai/code/[^ ]*' | head -1 || true
+}
+
 wait_for() {
   local pattern="$1" description="$2"
   local waited=0
@@ -35,49 +58,65 @@ wait_for() {
     sleep "$POLL_INTERVAL"
     waited=$((waited + POLL_INTERVAL))
   done
-  echo "[$name]   Timed out waiting for: $description"
-  echo "$output" | tail -5
+  if ! $json_output; then
+    echo "[$name]   Timed out waiting for: $description"
+    echo "$output" | tail -5
+  fi
   return 1
 }
 
-echo "[$name] Step 1: Opening remote control menu..."
+emit '{"step":"opening-menu"}' "[$name] Step 1: Opening remote control menu..."
 pty send "$name" --with-delay 0.3 --seq "/remote-control" --seq key:return
 
-echo "[$name] Step 2: Waiting for menu..."
+emit '{"step":"waiting-for-menu"}' "[$name] Step 2: Waiting for menu..."
 if ! wait_for 'Disconnect this session' 'disconnect menu'; then
-  echo "[$name]   Aborting. Sending Escape to dismiss."
+  emit '{"step":"error","message":"timed out waiting for disconnect menu"}' \
+       "[$name]   Aborting. Sending Escape to dismiss."
   pty send "$name" --seq key:escape
   exit 1
 fi
-echo "[$name]   Menu detected."
+emit '{"step":"menu-detected"}' "[$name]   Menu detected."
 
-echo "[$name] Step 3: Selecting 'Disconnect this session'..."
+emit '{"step":"disconnecting"}' "[$name] Step 3: Selecting 'Disconnect this session'..."
 pty send "$name" --with-delay 0.3 --seq key:up --seq key:up --seq key:return
 
-echo "[$name] Step 4: Waiting for disconnect..."
+emit '{"step":"waiting-for-disconnect"}' "[$name] Step 4: Waiting for disconnect..."
 if ! wait_for 'Remote Control disconnected' 'disconnect confirmation'; then
-  echo "[$name]   Aborting."
+  emit '{"step":"error","message":"timed out waiting for disconnect confirmation"}' \
+       "[$name]   Aborting."
   exit 1
 fi
-echo "[$name]   Disconnected."
+emit '{"step":"disconnected"}' "[$name]   Disconnected."
 
 sleep 1
 
-echo "[$name] Step 5: Reconnecting..."
+emit '{"step":"reconnecting"}' "[$name] Step 5: Reconnecting..."
 pty send "$name" --with-delay 0.3 --seq "/remote-control" --seq key:return
 
-echo "[$name] Step 6: Waiting for reconnection..."
+emit '{"step":"waiting-for-reconnection"}' "[$name] Step 6: Waiting for reconnection..."
 if wait_for '/remote-control is active' 'remote control active'; then
-  echo "[$name]   Reconnected successfully!"
+  url=$(extract_url)
+  if $json_output; then
+    echo "{\"step\":\"done\",\"success\":true,\"url\":\"${url}\"}"
+  else
+    echo "[$name]   Reconnected successfully!"
+  fi
 else
   output=$(peek)
   if echo "$output" | grep -q 'Remote Control reconnecting'; then
-    echo "[$name]   Ended up in reconnecting state again."
+    emit '{"step":"error","message":"ended up in reconnecting state again"}' \
+         "[$name]   Ended up in reconnecting state again."
     exit 1
   elif echo "$output" | grep -q 'Remote Control active'; then
-    echo "[$name]   Reconnected successfully!"
+    url=$(extract_url)
+    if $json_output; then
+      echo "{\"step\":\"done\",\"success\":true,\"url\":\"${url}\"}"
+    else
+      echo "[$name]   Reconnected successfully!"
+    fi
   else
-    echo "[$name]   Status unclear."
+    emit '{"step":"error","message":"status unclear after reconnection attempt"}' \
+         "[$name]   Status unclear."
     exit 1
   fi
 fi
