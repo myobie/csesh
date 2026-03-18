@@ -26,7 +26,10 @@ This compiles a standalone binary and copies it to `~/bin/claw`.
 claw                              # auto-detect: --continue if <12h, else --resume
 claw --new                        # fresh session, no continue/resume
 claw --resume                     # always show resume picker
+claw --yolo                       # skip permissions (--dangerously-skip-permissions)
 ```
+
+Any unrecognized flags are passed through to `claude`.
 
 ### Environment
 
@@ -61,6 +64,6 @@ crc-cycle --json <pty-name>       # JSON output
 ## How it works
 
 - **Session discovery**: Finds running `claude` processes via `ps`, resolves their working directories with `lsof`, and cross-references with `~/.claude/projects/*/sessions-index.json` for metadata.
-- **Project resolution**: Scans `~/src/` with progressive specificity — bare names search `~/src/*/*/<name>`, `org/repo` searches `~/src/*/org/repo`, and `host/org/repo` is a direct lookup. Errors on ambiguous matches.
-- **Age-based continue/resume**: Reads the most recent non-sidechain session from `sessions-index.json`. If modified within the last 12 hours, uses `--continue`; otherwise uses `--resume`.
-- **pty integration**: Every session runs inside a named `pty` session. If a session with that name already exists, `claw` attaches to it instead of creating a new one.
+- **Project resolution**: Scans `CLAW_PATH` (default `~/src`) with progressive specificity — bare names search `*/*/name`, `org/repo` searches `*/org/repo`, and `host/org/repo` is a direct lookup. Errors on ambiguous matches.
+- **Age-based continue/resume**: Reads the most recent non-sidechain session from `sessions-index.json`. If modified within the last 12 hours, uses `--continue`; if older, uses `--resume`; if no sessions exist, starts fresh.
+- **pty integration**: Every session runs inside a named `pty` session. If a running session with that name already exists, `claw` attaches to it. Exited pty sessions are automatically cleaned up and replaced with a fresh session.
