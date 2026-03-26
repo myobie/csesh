@@ -58,17 +58,3 @@ export async function readBridgePointer(
     return null;
   }
 }
-
-/** Get the most recent non-sidechain session entry from an index. */
-export function getMostRecentSession(
-  index: SessionIndex,
-): SessionEntry | null {
-  const candidates = index.entries.filter((e) => !e.isSidechain);
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => {
-    const ma = a.modified ?? "";
-    const mb = b.modified ?? "";
-    return ma < mb ? 1 : ma > mb ? -1 : 0;
-  });
-  return candidates[0];
-}

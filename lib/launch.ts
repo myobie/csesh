@@ -1,6 +1,5 @@
 import { basename } from "jsr:@std/path@^1.0";
 import { resolveProject } from "./resolve.ts";
-import { getMostRecentSession, readSessionIndex } from "./claude.ts";
 
 export interface LaunchOptions {
   repo?: string;
@@ -39,9 +38,7 @@ export async function runLaunch(opts: LaunchOptions): Promise<never> {
   } else if (opts.resume) {
     claudeArgs.push("--resume");
   } else {
-    // Auto-detect: continue if <12h, else resume
-    const flag = await detectSessionFlag(projectDir);
-    if (flag) claudeArgs.push(flag);
+    claudeArgs.push("--continue");
   }
 
   // Launch via pty
@@ -128,20 +125,3 @@ async function resolvePtyCwd(pid: number): Promise<string | null> {
   return null;
 }
 
-async function detectSessionFlag(
-  projectDir: string,
-): Promise<string | null> {
-  const index = await readSessionIndex(projectDir);
-  if (!index) return null;
-
-  const latest = getMostRecentSession(index);
-  if (!latest?.modified) return null;
-
-  const modifiedAt = new Date(latest.modified).getTime();
-  const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
-
-  if (modifiedAt > twelveHoursAgo) {
-    return "--continue";
-  }
-  return "--resume";
-}

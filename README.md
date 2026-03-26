@@ -23,7 +23,7 @@ This compiles a standalone binary and copies it to `~/bin/claw`.
 ### Launching sessions
 
 ```
-claw                              # auto-detect: --continue if <12h, else --resume
+claw                              # continue most recent session (or start fresh)
 claw --new                        # fresh session, no continue/resume
 claw --resume                     # always show resume picker
 claw --yolo                       # skip permissions (--dangerously-skip-permissions)
@@ -54,6 +54,16 @@ claw sessions --json              # JSON output
 claw sessions --all               # include non-running
 ```
 
+### Worktrees
+
+```
+claw worktree <branch>            # create worktree at ../<repo>--<branch>
+claw worktree <branch> <repo>     # create worktree in a resolved project
+claw wt <branch>                  # shorthand
+```
+
+If the branch already exists locally, the worktree checks it out. Otherwise, a new tracking branch is created (`--track -b`).
+
 ### Remote control cycling
 
 ```
@@ -65,5 +75,5 @@ crc-cycle --json <pty-name>       # JSON output
 
 - **Session discovery**: Finds running `claude` processes via `ps`, resolves their working directories with `lsof`, and cross-references with `~/.claude/projects/*/sessions-index.json` for metadata.
 - **Project resolution**: Scans `CLAW_PATH` (default `~/src`) with progressive specificity — bare names search `*/*/name`, `org/repo` searches `*/org/repo`, and `host/org/repo` is a direct lookup. Errors on ambiguous matches.
-- **Age-based continue/resume**: Reads the most recent non-sidechain session from `sessions-index.json`. If modified within the last 12 hours, uses `--continue`; if older, uses `--resume`; if no sessions exist, starts fresh.
+- **Auto-continue**: Always passes `--continue` by default, which continues the most recent session if one exists or starts fresh otherwise. Use `--resume` to pick from older sessions.
 - **pty integration**: Every session runs inside a named `pty` session. If a running session with that name already exists, `claw` attaches to it. Exited pty sessions are automatically cleaned up and replaced with a fresh session.

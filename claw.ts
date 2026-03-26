@@ -1,13 +1,16 @@
 import { listSessions, formatTable } from "./lib/sessions.ts";
 import { runLaunch } from "./lib/launch.ts";
+import { runWorktree } from "./lib/worktree.ts";
 
 const HELP = `claw — launch and manage Claude Code sessions
 
 Usage:
-  claw                        Auto-detect: --continue if <12h, else --resume
+  claw                        Continue most recent session (or start fresh)
   claw --new                  Fresh session, no continue/resume
   claw --resume               Always show resume picker
   claw <repo>                 Launch in a project directory
+  claw worktree <branch>      Create worktree at ../<repo>--<branch>
+  claw worktree <branch> <repo>  Create worktree in a resolved project
   claw sessions               List running sessions
   claw sessions --json        JSON output
   claw sessions --all         Include non-running sessions
@@ -74,7 +77,20 @@ if (flags.help) {
   Deno.exit(0);
 }
 
-if (subcommand === "sessions") {
+if (subcommand === "worktree" || subcommand === "wt") {
+  const branch = extraArgs[0];
+  if (!branch) {
+    console.error("Usage: claw worktree <branch> [repo]");
+    Deno.exit(1);
+  }
+  const repo = extraArgs[1];
+  try {
+    await runWorktree({ repo, branch });
+  } catch (e) {
+    console.error((e as Error).message);
+    Deno.exit(1);
+  }
+} else if (subcommand === "sessions") {
   const sessions = await listSessions({ all: flags.all });
   if (flags.json) {
     console.log(JSON.stringify(sessions, null, 2));
