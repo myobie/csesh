@@ -29,20 +29,24 @@ export async function runLaunch(opts: LaunchOptions): Promise<never> {
   }
 
   // Build claude command
-  const claudeArgs = ["claude"];
-  if (opts.yolo) claudeArgs.push("--dangerously-skip-permissions");
-  claudeArgs.push(...opts.extraArgs);
+  const baseArgs = ["claude"];
+  if (opts.yolo) baseArgs.push("--dangerously-skip-permissions");
+  baseArgs.push(...opts.extraArgs);
 
+  let shellCmd: string;
   if (opts.new) {
-    // Fresh session — no extra flags
+    shellCmd = baseArgs.join(" ");
   } else if (opts.resume) {
-    claudeArgs.push("--resume");
+    shellCmd = [...baseArgs, "--resume"].join(" ");
   } else {
-    claudeArgs.push("--continue");
+    // Try --continue, fall back to fresh session
+    const continueCmd = [...baseArgs, "--continue"].join(" ");
+    const freshCmd = baseArgs.join(" ");
+    shellCmd = `${continueCmd} || ${freshCmd}`;
   }
 
   // Launch via pty
-  const ptyArgs = ["pty", "run", "-a", ptyName, "--", ...claudeArgs];
+  const ptyArgs = ["pty", "run", "-a", ptyName, "--", "bash", "-c", shellCmd];
   const cmd = new Deno.Command(ptyArgs[0], {
     args: ptyArgs.slice(1),
     cwd: projectDir,

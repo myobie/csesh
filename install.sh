@@ -6,4 +6,5 @@ deno compile --allow-env --allow-read --allow-run \
   --output "${SCRIPT_DIR}/claw" "${SCRIPT_DIR}/claw.ts"
 mkdir -p "${HOME}/bin"
 cp "${SCRIPT_DIR}/claw" "${HOME}/bin/claw"
+codesign -s - "${HOME}/bin/claw"
 echo "Installed claw to ~/bin/claw"
